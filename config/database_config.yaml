@@ -1,0 +1,37 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  database_config.yaml — Configuration PostgreSQL
+#  Référencé par : datamart.py (spark-submit via JDBC) et api/ (SQLAlchemy)
+#
+#  IMPORTANT : Ne jamais committer ce fichier avec de vrais mots de passe.
+#              Ajouter config/database_config.yaml dans .gitignore en production.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Connexion PostgreSQL ──────────────────────────────────────────────────────
+postgresql:
+  host: "postgres"              # Nom du service Docker (utiliser "localhost" hors Docker)
+  port: 5432
+  user: "foodnutrition"
+  password: "foodnutrition123"
+  database: "food_nutrition"
+
+# ── JDBC — utilisé par Spark (datamart.py) ────────────────────────────────────
+jdbc:
+  driver: "org.postgresql.Driver"
+  # L'URL est construite dynamiquement à partir des valeurs postgresql ci-dessus :
+  # jdbc:postgresql://{host}:{port}/{database}
+  write_mode: "overwrite"       # Mode d'écriture Spark → PostgreSQL (overwrite / append)
+  batch_size: 10000             # Nombre de lignes par batch lors de l'écriture JDBC
+
+# ── SQLAlchemy — utilisé par l'API FastAPI ────────────────────────────────────
+sqlalchemy:
+  pool_size: 5                  # Connexions maintenues ouvertes
+  max_overflow: 10              # Connexions supplémentaires autorisées en pic
+  pool_timeout: 30              # Secondes d'attente avant timeout de connexion
+  echo: false                   # Mettre à true pour logger toutes les requêtes SQL
+
+# ── Noms des tables datamarts ─────────────────────────────────────────────────
+datamarts:
+  sugar_by_category: "dm_sugar_by_category"
+  nutriscore_by_country: "dm_nutriscore_by_country"
+  additives_analysis: "dm_additives_analysis"
+  ml_nutriscore_prediction: "dm_ml_nutriscore_prediction"

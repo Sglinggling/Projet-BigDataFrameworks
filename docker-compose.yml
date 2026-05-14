@@ -1,0 +1,169 @@
+version: "3.8"
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Plateforme Big Data — Food Nutrition Lakehouse
+#  Services : MinIO · PostgreSQL · Hive Metastore · Spark Master · Spark Worker
+#
+#  Démarrage : docker compose up -d
+#  Arrêt     : docker compose down
+#  Reset data: docker compose down -v
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ───────────────────────────────────────────────────────
+  #  MinIO — Data Lake (compatible S3)
+  #  Console : http://localhost:9001  (minioadmin / minioadmin123)
+  #  API S3  : http://localhost:9000
+  # ───────────────────────────────────────────────────────
+  minio:
+    image: minio/minio:RELEASE.2024-03-15T01-07-15Z
+    container_name: minio
+    ports:
+      - "9000:9000"   # S3 API — utilisé par Spark (s3a://)
+      - "9001:9001"   # Console web
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - bigdata-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+
+  # Crée les buckets MinIO au premier démarrage
+  minio-init:
+    image: minio/mc:latest
+    container_name: minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks:
+      - bigdata-net
+    entrypoint: >
+      /bin/sh -c "
+        mc alias set local http://minio:9000 minioadmin minioadmin123;
+        mc mb local/raw       --ignore-existing;
+        mc mb local/silver    --ignore-existing;
+        mc mb local/warehouse --ignore-existing;
+        echo '>>> Buckets MinIO créés : raw, silver, warehouse';
+      "
+    restart: on-failure
+
+  # ───────────────────────────────────────────────────────
+  #  PostgreSQL — Stockage des datamarts finaux
+  #  Connexion : localhost:5432 / foodnutrition / foodnutrition123 / food_nutrition
+  # ───────────────────────────────────────────────────────
+  postgres:
+    image: postgres:15
+    container_name: postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: foodnutrition
+      POSTGRES_PASSWORD: foodnutrition123
+      POSTGRES_DB: food_nutrition
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - bigdata-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U foodnutrition -d food_nutrition"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ───────────────────────────────────────────────────────
+  #  Hive Metastore — Catalogue des tables Hive
+  #  Thrift URI : thrift://hive-metastore:9083
+  #  Stockage   : Derby embarqué (volume hive_derby_data)
+  # ───────────────────────────────────────────────────────
+  hive-metastore:
+    image: apache/hive:4.0.0
+    container_name: hive-metastore
+    environment:
+      SERVICE_NAME: metastore       # Lance uniquement le metastore (pas HiveServer2)
+      HIVE_METASTORE_WAREHOUSE_DIR: s3a://warehouse/
+      # Derby : base de métadonnées embarquée stockée dans le volume
+      HADOOP_OPTS: "-Dderby.system.home=/tmp/derby"
+    ports:
+      - "9083:9083"   # Thrift port — référencé dans spark_config.yaml
+    volumes:
+      - hive_derby_data:/tmp/derby
+    networks:
+      - bigdata-net
+    restart: unless-stopped
+
+  # ───────────────────────────────────────────────────────
+  #  Spark Master
+  #  UI        : http://localhost:8080
+  #  Submit URL: spark://localhost:7077
+  # ───────────────────────────────────────────────────────
+  spark-master:
+    image: bitnami/spark:3.5
+    container_name: spark-master
+    environment:
+      - SPARK_MODE=master
+      - SPARK_MASTER_HOST=spark-master
+      - SPARK_MASTER_PORT=7077
+      - SPARK_MASTER_WEBUI_PORT=8080
+      # Augmenter si nécessaire selon la RAM disponible
+      - SPARK_DRIVER_MEMORY=1g
+    ports:
+      - "7077:7077"   # Spark master (spark-submit pointe ici)
+      - "8080:8080"   # Spark Master UI
+    volumes:
+      - ./scripts:/opt/bitnami/spark/scripts       # Accès aux scripts PySpark
+      - ./config:/opt/bitnami/spark/config         # Accès aux configs YAML
+      - ./data:/opt/bitnami/spark/data             # Accès aux données locales
+      - ./logs:/opt/bitnami/spark/logs             # Sortie des logs
+    networks:
+      - bigdata-net
+
+  # ───────────────────────────────────────────────────────
+  #  Spark Worker
+  #  UI : http://localhost:8081
+  # ───────────────────────────────────────────────────────
+  spark-worker:
+    image: bitnami/spark:3.5
+    container_name: spark-worker
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077
+      - SPARK_WORKER_MEMORY=2G    # RAM allouée au worker (adapter selon machine)
+      - SPARK_WORKER_CORES=2      # Cœurs alloués au worker
+      - SPARK_WORKER_WEBUI_PORT=8081
+    ports:
+      - "8081:8081"   # Spark Worker UI
+    depends_on:
+      - spark-master
+    volumes:
+      - ./scripts:/opt/bitnami/spark/scripts
+      - ./config:/opt/bitnami/spark/config
+      - ./data:/opt/bitnami/spark/data
+      - ./logs:/opt/bitnami/spark/logs
+    networks:
+      - bigdata-net
+
+# ─────────────────────────────────────────────────────────
+#  Volumes persistants
+# ─────────────────────────────────────────────────────────
+volumes:
+  minio_data:          # Données brutes et silver dans MinIO
+  postgres_data:       # Tables des datamarts
+  hive_derby_data:     # Métadonnées Hive (Derby embarqué)
+
+# ─────────────────────────────────────────────────────────
+#  Réseau interne — tous les services communiquent via DNS
+#  (ex: spark-master peut appeler "minio:9000")
+# ─────────────────────────────────────────────────────────
+networks:
+  bigdata-net:
+    driver: bridge

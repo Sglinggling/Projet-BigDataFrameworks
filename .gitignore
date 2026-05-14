@@ -1,0 +1,43 @@
+cat > .gitignore << 'EOF'
+# === Datasets (trop volumineux pour Git) ===
+data/input/
+data/raw/
+data/silver/
+data/sample/
+
+# Extensions de données
+*.csv
+*.tsv
+*.parquet
+*.gz
+*.jsonl
+
+# Exceptions : on garde les .gitkeep pour préserver la structure
+!**/.gitkeep
+
+# === Python ===
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# === Logs ===
+logs/*.txt
+logs/*.log
+
+# === IDE ===
+.vscode/
+.idea/
+.DS_Store
+
+# === Secrets ===
+.env
+*.pem
+*.key
+
+# === Docker volumes locaux ===
+minio-data/
+postgres-data/
+hive-metastore-data/
+EOF

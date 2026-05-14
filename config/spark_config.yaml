@@ -1,0 +1,43 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  spark_config.yaml — Configuration Spark et connecteurs
+#  Référencé par : create_spark_session() dans chaque script PySpark
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Paramètres Spark principaux ───────────────────────────────────────────────
+spark:
+  app_name: "FoodNutritionBigData"            # Nom visible dans la Spark UI
+  master: "spark://spark-master:7077"          # URL du Spark Master (dans Docker)
+  # master: "local[*]"                         # Décommenter pour exécution locale hors Docker
+  executor_memory: "2g"                        # RAM par executor
+  driver_memory: "1g"                          # RAM du driver
+  executor_cores: 2                            # Cœurs par executor
+  sql_shuffle_partitions: 200                  # Partitions après shuffle (réduire si petit dataset)
+  default_parallelism: 4                       # Parallélisme par défaut
+
+# ── Hive Metastore ────────────────────────────────────────────────────────────
+hive:
+  metastore_uris: "thrift://hive-metastore:9083"   # URI thrift du conteneur Hive
+  warehouse_dir: "s3a://warehouse/"                 # Répertoire des tables Hive dans MinIO
+
+# ── S3A — Connexion MinIO ────────────────────────────────────────────────────
+s3a:
+  endpoint: "http://minio:9000"            # URL MinIO dans le réseau Docker
+  # endpoint: "http://localhost:9000"      # Décommenter si exécuté hors Docker
+  access_key: "minioadmin"
+  secret_key: "minioadmin123"
+  path_style_access: true                  # Obligatoire pour MinIO (pas de virtual hosting)
+  impl: "org.apache.hadoop.fs.s3a.S3AFileSystem"
+  connection_ssl_enabled: false            # Pas de TLS en local
+
+# ── Dépendances Maven (téléchargées automatiquement au démarrage) ─────────────
+# Ces packages ajoutent le support S3A/MinIO à Spark.
+# Ils sont téléchargés depuis Maven Central lors du premier spark-submit.
+packages:
+  - "org.apache.hadoop:hadoop-aws:3.3.4"
+  - "com.amazonaws:aws-java-sdk-bundle:1.12.261"
+  - "org.postgresql:postgresql:42.7.1"      # Driver JDBC pour écrire dans PostgreSQL
+
+# ── Configurations de persistance (cache) ────────────────────────────────────
+# Utilisées dans processor.py pour cache() / persist()
+persistence:
+  storage_level: "MEMORY_AND_DISK"         # Niveau de persistance Spark

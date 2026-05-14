@@ -1,0 +1,47 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  app_config.yaml — Configuration applicative générale
+#  Référencé par : feeder.py, processor.py, datamart.py
+#  Aucun chemin ne doit être codé en dur dans les scripts Python.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Stockage Data Lake (MinIO via protocole S3A) ──────────────────────────────
+storage:
+  raw_base_path: "s3a://raw"           # Couche bronze — données brutes partitionnées
+  silver_base_path: "s3a://silver"     # Couche silver — données nettoyées
+  warehouse_path: "s3a://warehouse"    # Répertoire Hive warehouse
+
+# ── Sources de données (chemins dans le conteneur Spark) ─────────────────────
+sources:
+  openfoodfacts:
+    path: "/opt/bitnami/spark/data/input/openfoodfacts"
+    filename: "en.openfoodfacts.org.products.csv"   # Fichier CSV Open Food Facts
+    delimiter: "\t"                                  # Séparateur tabulation
+    encoding: "utf-8"
+  countries:
+    path: "/opt/bitnami/spark/data/input/countries"
+    filename: "countries of the world.csv"
+    delimiter: ","
+    encoding: "utf-8"
+
+# ── Noms des tables Hive (couche silver) ─────────────────────────────────────
+hive:
+  database: "food_nutrition"           # Base de données Hive à créer si absente
+  tables:
+    silver_products: "silver_products"         # Produits alimentaires nettoyés
+    silver_countries: "silver_countries"       # Données pays nettoyées
+    silver_joined: "silver_food_by_country"    # Jointure produits × pays
+
+# ── Partitionnement Parquet ──────────────────────────────────────────────────
+partitioning:
+  columns: ["year", "month", "day"]    # Colonnes de partition dérivées de la date d'ingestion
+  date_format: "%Y-%m-%d"             # Format de la date d'ingestion ajoutée aux DataFrames
+
+# ── Logging ──────────────────────────────────────────────────────────────────
+logging:
+  log_dir: "/opt/bitnami/spark/logs"   # Répertoire de sortie des fichiers .txt
+  level: "INFO"                        # Niveau de log (DEBUG, INFO, WARNING, ERROR)
+
+# ── Seuils de validation ──────────────────────────────────────────────────────
+validation:
+  min_rows_openfoodfacts: 200000       # Volume minimum attendu après ingestion
+  min_rows_countries: 200              # Volume minimum pour les pays
