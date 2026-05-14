@@ -1,5 +1,3 @@
-version: "3.8"
-
 # ─────────────────────────────────────────────────────────────────────────────
 #  Plateforme Big Data — Food Nutrition Lakehouse
 #  Services : MinIO · PostgreSQL · Hive Metastore · Spark Master · Spark Worker
@@ -13,15 +11,14 @@ services:
 
   # ───────────────────────────────────────────────────────
   #  MinIO — Data Lake (compatible S3)
-  #  Console : http://localhost:9001  (minioadmin / minioadmin123)
-  #  API S3  : http://localhost:9000
   # ───────────────────────────────────────────────────────
   minio:
-    image: minio/minio:RELEASE.2024-03-15T01-07-15Z
+    image: minio/minio:latest
     container_name: minio
+    hostname: minio
     ports:
-      - "9000:9000"   # S3 API — utilisé par Spark (s3a://)
-      - "9001:9001"   # Console web
+      - "9000:9000"
+      - "9001:9001"
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin123
@@ -37,7 +34,6 @@ services:
       retries: 5
       start_period: 10s
 
-  # Crée les buckets MinIO au premier démarrage
   minio-init:
     image: minio/mc:latest
     container_name: minio-init
@@ -57,12 +53,12 @@ services:
     restart: on-failure
 
   # ───────────────────────────────────────────────────────
-  #  PostgreSQL — Stockage des datamarts finaux
-  #  Connexion : localhost:5432 / foodnutrition / foodnutrition123 / food_nutrition
+  #  PostgreSQL
   # ───────────────────────────────────────────────────────
   postgres:
     image: postgres:15
     container_name: postgres
+    hostname: postgres
     ports:
       - "5432:5432"
     environment:
@@ -81,20 +77,18 @@ services:
       start_period: 10s
 
   # ───────────────────────────────────────────────────────
-  #  Hive Metastore — Catalogue des tables Hive
-  #  Thrift URI : thrift://hive-metastore:9083
-  #  Stockage   : Derby embarqué (volume hive_derby_data)
+  #  Hive Metastore
   # ───────────────────────────────────────────────────────
   hive-metastore:
     image: apache/hive:4.0.0
     container_name: hive-metastore
+    hostname: hive-metastore
     environment:
-      SERVICE_NAME: metastore       # Lance uniquement le metastore (pas HiveServer2)
+      SERVICE_NAME: metastore
       HIVE_METASTORE_WAREHOUSE_DIR: s3a://warehouse/
-      # Derby : base de métadonnées embarquée stockée dans le volume
       HADOOP_OPTS: "-Dderby.system.home=/tmp/derby"
     ports:
-      - "9083:9083"   # Thrift port — référencé dans spark_config.yaml
+      - "9083:9083"
     volumes:
       - hive_derby_data:/tmp/derby
     networks:
@@ -102,68 +96,81 @@ services:
     restart: unless-stopped
 
   # ───────────────────────────────────────────────────────
-  #  Spark Master
-  #  UI        : http://localhost:8080
-  #  Submit URL: spark://localhost:7077
+  #  Spark Master (image officielle Apache)
+  #  UI : http://localhost:8080
   # ───────────────────────────────────────────────────────
   spark-master:
-    image: bitnami/spark:3.5
+    image: apache/spark:3.5.3
     container_name: spark-master
-    environment:
-      - SPARK_MODE=master
-      - SPARK_MASTER_HOST=spark-master
-      - SPARK_MASTER_PORT=7077
-      - SPARK_MASTER_WEBUI_PORT=8080
-      # Augmenter si nécessaire selon la RAM disponible
-      - SPARK_DRIVER_MEMORY=1g
+    hostname: spark-master
+    user: root
     ports:
-      - "7077:7077"   # Spark master (spark-submit pointe ici)
-      - "8080:8080"   # Spark Master UI
+      - "7077:7077"
+      - "8080:8080"
+    environment:
+      - SPARK_NO_DAEMONIZE=true
+      - SPARK_LOCAL_HOSTNAME=spark-master
+      - SPARK_MASTER_HOST=spark-master
+    command: >
+      /bin/bash -c "
+      mkdir -p /opt/spark/jars-extra &&
+      cd /opt/spark/jars-extra &&
+      [ ! -f hadoop-aws-3.3.4.jar ] && wget -q https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar || true ;
+      [ ! -f aws-java-sdk-bundle-1.12.262.jar ] && wget -q https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.262/aws-java-sdk-bundle-1.12.262.jar || true ;
+      cp /opt/spark/jars-extra/*.jar /opt/spark/jars/ ;
+      /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master --host spark-master
+      "
     volumes:
-      - ./scripts:/opt/bitnami/spark/scripts       # Accès aux scripts PySpark
-      - ./config:/opt/bitnami/spark/config         # Accès aux configs YAML
-      - ./data:/opt/bitnami/spark/data             # Accès aux données locales
-      - ./logs:/opt/bitnami/spark/logs             # Sortie des logs
+      - ./scripts:/opt/spark/scripts
+      - ./config:/opt/spark/config
+      - ./data:/opt/spark/data
+      - ./logs:/opt/spark/logs
+      - spark_jars:/opt/spark/jars-extra
     networks:
       - bigdata-net
 
   # ───────────────────────────────────────────────────────
-  #  Spark Worker
-  #  UI : http://localhost:8081
+  #  Spark Worker (image officielle Apache)
+  #  UI : http://localhost:8082  (8081 occupé sur la machine hôte)
   # ───────────────────────────────────────────────────────
   spark-worker:
-    image: bitnami/spark:3.5
+    image: apache/spark:3.5.3
     container_name: spark-worker
-    environment:
-      - SPARK_MODE=worker
-      - SPARK_MASTER_URL=spark://spark-master:7077
-      - SPARK_WORKER_MEMORY=2G    # RAM allouée au worker (adapter selon machine)
-      - SPARK_WORKER_CORES=2      # Cœurs alloués au worker
-      - SPARK_WORKER_WEBUI_PORT=8081
+    hostname: spark-worker
+    user: root
     ports:
-      - "8081:8081"   # Spark Worker UI
+      - "8082:8081"
+    environment:
+      - SPARK_NO_DAEMONIZE=true
+      - SPARK_LOCAL_HOSTNAME=spark-worker
+      - SPARK_WORKER_MEMORY=2G
+      - SPARK_WORKER_CORES=2
+    command: >
+      /bin/bash -c "
+      mkdir -p /opt/spark/jars-extra &&
+      cd /opt/spark/jars-extra &&
+      [ ! -f hadoop-aws-3.3.4.jar ] && wget -q https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar || true ;
+      [ ! -f aws-java-sdk-bundle-1.12.262.jar ] && wget -q https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.262/aws-java-sdk-bundle-1.12.262.jar || true ;
+      cp /opt/spark/jars-extra/*.jar /opt/spark/jars/ ;
+      /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
+      "
     depends_on:
       - spark-master
     volumes:
-      - ./scripts:/opt/bitnami/spark/scripts
-      - ./config:/opt/bitnami/spark/config
-      - ./data:/opt/bitnami/spark/data
-      - ./logs:/opt/bitnami/spark/logs
+      - ./scripts:/opt/spark/scripts
+      - ./config:/opt/spark/config
+      - ./data:/opt/spark/data
+      - ./logs:/opt/spark/logs
+      - spark_jars:/opt/spark/jars-extra
     networks:
       - bigdata-net
 
-# ─────────────────────────────────────────────────────────
-#  Volumes persistants
-# ─────────────────────────────────────────────────────────
 volumes:
-  minio_data:          # Données brutes et silver dans MinIO
-  postgres_data:       # Tables des datamarts
-  hive_derby_data:     # Métadonnées Hive (Derby embarqué)
+  minio_data:
+  postgres_data:
+  hive_derby_data:
+  spark_jars:
 
-# ─────────────────────────────────────────────────────────
-#  Réseau interne — tous les services communiquent via DNS
-#  (ex: spark-master peut appeler "minio:9000")
-# ─────────────────────────────────────────────────────────
 networks:
   bigdata-net:
     driver: bridge
