@@ -25,11 +25,12 @@ sources:
 
 # ── Noms des tables Hive (couche silver) ─────────────────────────────────────
 hive:
-  database: "food_nutrition"           # Base de données Hive à créer si absente
+  database: "food_nutrition"           # Base de données globale du projet
+  silver_database: "silver"            # Schéma Hive dédié à la couche silver
   tables:
-    silver_products: "silver_products"         # Produits alimentaires nettoyés
-    silver_countries: "silver_countries"       # Données pays nettoyées
-    silver_joined: "silver_food_by_country"    # Jointure produits × pays
+    silver_products: "products_clean"          # Produits alimentaires nettoyés
+    silver_countries: "countries_clean"        # Données pays nettoyées
+    silver_joined: "products_enriched"         # Jointure produits × pays + rang sucre
 
 # ── Partitionnement Parquet ──────────────────────────────────────────────────
 partitioning:
@@ -45,3 +46,7 @@ logging:
 validation:
   min_rows_openfoodfacts: 200000       # Volume minimum attendu après ingestion
   min_rows_countries: 200              # Volume minimum pour les pays
+
+# ── Paramètres processor.py ───────────────────────────────────────────────────
+processor:
+  top_n_sugary_by_category: 10        # Top N produits les plus sucrés par catégorie (window function)

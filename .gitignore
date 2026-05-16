@@ -36,6 +36,8 @@ logs/*.log
 *.pem
 *.key
 
+CLAUDE.md
+
 # === Docker volumes locaux ===
 minio-data/
 postgres-data/

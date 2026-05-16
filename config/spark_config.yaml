@@ -14,10 +14,12 @@ spark:
   sql_shuffle_partitions: 200                  # Partitions après shuffle (réduire si petit dataset)
   default_parallelism: 4                       # Parallélisme par défaut
 
-# ── Hive Metastore ────────────────────────────────────────────────────────────
+# ── Hive Metastore (Derby embedded) ──────────────────────────────────────────
+# Mode sans service externe : Spark gère son propre catalogue via Derby embedded.
+# Satisfait la contrainte "tables Hive internes via saveAsTable()" sans hive-metastore.
 hive:
-  metastore_uris: "thrift://hive-metastore:9083"   # URI thrift du conteneur Hive
-  warehouse_dir: "s3a://warehouse/"                 # Répertoire des tables Hive dans MinIO
+  warehouse_dir: "s3a://warehouse/"                 # Données des tables Hive dans MinIO
+  derby_db_path: "/opt/spark/hive_metastore_db"     # Catalogue Derby local au conteneur Spark
 
 # ── S3A — Connexion MinIO ────────────────────────────────────────────────────
 s3a:

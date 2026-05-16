@@ -77,25 +77,6 @@ services:
       start_period: 10s
 
   # ───────────────────────────────────────────────────────
-  #  Hive Metastore
-  # ───────────────────────────────────────────────────────
-  hive-metastore:
-    image: apache/hive:4.0.0
-    container_name: hive-metastore
-    hostname: hive-metastore
-    environment:
-      SERVICE_NAME: metastore
-      HIVE_METASTORE_WAREHOUSE_DIR: s3a://warehouse/
-      HADOOP_OPTS: "-Dderby.system.home=/tmp/derby"
-    ports:
-      - "9083:9083"
-    volumes:
-      - hive_derby_data:/tmp/derby
-    networks:
-      - bigdata-net
-    restart: unless-stopped
-
-  # ───────────────────────────────────────────────────────
   #  Spark Master (image officielle Apache)
   #  UI : http://localhost:8080
   # ───────────────────────────────────────────────────────
@@ -168,7 +149,6 @@ services:
 volumes:
   minio_data:
   postgres_data:
-  hive_derby_data:
   spark_jars:
 
 networks:

@@ -40,26 +40,30 @@ from pyspark.sql.types import (
 # rapide que inferSchema=true sur un fichier de plusieurs Go, et plus robuste
 # qu'un schéma positionnel (les colonnes OFF peuvent varier selon la version).
 #
-# Noms avec tiret (energy-kcal_100g, saturated-fat_100g) : noms officiels OFF.
-# Ils nécessitent des backticks dans les expressions col() de PySpark car le tiret
-# est un opérateur arithmétique dans Spark SQL.
+# Colonnes à noms spéciaux (tirets) : nutrition-score-fr_100g, saturated-fat_100g.
+# Le tiret est un opérateur arithmétique dans Spark SQL — ces colonnes nécessitent
+# des backticks dans col() : col("`nutrition-score-fr_100g`").
+# Dans processor.py, nutrition-score-fr_100g est renommé dès la lecture pour éviter
+# de propager les backticks partout dans le code aval.
 OFF_SCHEMA = StructType([
-    StructField("code",               StringType(),  True),  # Code-barres EAN
-    StructField("product_name",       StringType(),  True),  # Nom du produit
-    StructField("countries_en",       StringType(),  True),  # Pays de vente (liste CSV interne)
-    StructField("categories_en",      StringType(),  True),  # Catégories taxonomiques
-    StructField("main_category",      StringType(),  True),  # Catégorie principale
-    StructField("nutriscore_grade",   StringType(),  True),  # Grade : a, b, c, d ou e
-    StructField("nutriscore_score",   IntegerType(), True),  # Score Nutri-Score brut
-    StructField("energy-kcal_100g",   DoubleType(),  True),  # Énergie (kcal/100g)
-    StructField("fat_100g",           DoubleType(),  True),  # Graisses totales (g/100g)
-    StructField("saturated-fat_100g", DoubleType(),  True),  # Graisses saturées (g/100g)
-    StructField("sugars_100g",        DoubleType(),  True),  # Sucres (g/100g)
-    StructField("fiber_100g",         DoubleType(),  True),  # Fibres alimentaires (g/100g)
-    StructField("proteins_100g",      DoubleType(),  True),  # Protéines (g/100g)
-    StructField("salt_100g",          DoubleType(),  True),  # Sel (g/100g)
-    StructField("additives_n",        IntegerType(), True),  # Nombre d'additifs déclarés
-    StructField("additives_tags",     StringType(),  True),  # Tags additifs pour Phase 3
+    StructField("code",                    StringType(),  True),  # Code-barres EAN
+    StructField("product_name",            StringType(),  True),  # Nom du produit
+    StructField("countries_en",            StringType(),  True),  # Pays de vente (liste CSV interne)
+    StructField("categories_en",           StringType(),  True),  # Catégories taxonomiques
+    StructField("main_category",           StringType(),  True),  # Catégorie principale
+    # Nutri-Score : renommés dans le dump récent (anciens noms : nutriscore_grade / nutriscore_score)
+    StructField("nutrition_grade_fr",      StringType(),  True),  # Grade Nutri-Score : a, b, c, d ou e
+    StructField("nutrition-score-fr_100g", DoubleType(),  True),  # Score numérique (backtick requis dans col())
+    # Énergie : le dump récent expose energy_100g (en kJ/100g), pas energy-kcal_100g
+    StructField("energy_100g",             DoubleType(),  True),  # Énergie en kJ/100g
+    StructField("fat_100g",                DoubleType(),  True),  # Graisses totales (g/100g)
+    StructField("saturated-fat_100g",      DoubleType(),  True),  # Graisses saturées (g/100g)
+    StructField("sugars_100g",             DoubleType(),  True),  # Sucres (g/100g)
+    StructField("fiber_100g",              DoubleType(),  True),  # Fibres alimentaires (g/100g)
+    StructField("proteins_100g",           DoubleType(),  True),  # Protéines (g/100g)
+    StructField("salt_100g",               DoubleType(),  True),  # Sel (g/100g)
+    StructField("additives_n",             IntegerType(), True),  # Nombre d'additifs déclarés
+    StructField("additives_tags",          StringType(),  True),  # Tags additifs pour Phase 3
 ])
 
 
@@ -147,9 +151,12 @@ def create_spark_session(config: dict, logger: logging.Logger) -> SparkSession:
         .config("spark.executor.memory", spark_cfg["executor_memory"])
         .config("spark.driver.memory",   spark_cfg["driver_memory"])
         .config("spark.sql.shuffle.partitions", spark_cfg["sql_shuffle_partitions"])
-        # Hive metastore — nécessaire même dans feeder.py pour enableHiveSupport
-        .config("spark.sql.warehouse.dir",          hive_cfg["warehouse_dir"])
-        .config("spark.hadoop.hive.metastore.uris", hive_cfg["metastore_uris"])
+        # Hive embedded (Derby local) — pas de service hive-metastore externe
+        .config("spark.sql.warehouse.dir",               hive_cfg["warehouse_dir"])
+        .config("javax.jdo.option.ConnectionURL",         f"jdbc:derby:;databaseName={hive_cfg['derby_db_path']};create=true")
+        .config("javax.jdo.option.ConnectionDriverName",  "org.apache.derby.jdbc.EmbeddedDriver")
+        .config("datanucleus.schema.autoCreateAll",       "true")
+        .config("datanucleus.autoCreateSchema",           "true")
         # MinIO via le protocole S3A (compatible AWS S3)
         .config("spark.hadoop.fs.s3a.endpoint",               s3a_cfg["endpoint"])
         .config("spark.hadoop.fs.s3a.access.key",             s3a_cfg["access_key"])
@@ -424,13 +431,18 @@ def validate_ingestion(
     logger: logging.Logger,
 ) -> bool:
     """
-    Valide l'ingestion en relisant les partitions du jour depuis MinIO
-    et en comparant les comptages aux seuils définis dans app_config.yaml.
+    Valide l'ingestion en relisant les données du jour depuis MinIO et en comparant
+    les comptages aux seuils définis dans app_config.yaml.
 
-    Pourquoi une relecture Parquet est rapide :
-    Les fichiers Parquet stockent le nombre de lignes dans leur footer (métadonnées).
-    Spark lit uniquement ces métadonnées pour count() sans scanner les données réelles,
-    ce qui rend la validation quasi-instantanée même sur un large dataset.
+    Stratégie de lecture — chemin parent + filtre sur colonnes de partition :
+    On lit depuis le répertoire parent (ex : s3a://raw/openfoodfacts/) et on filtre
+    sur year/month/day plutôt que de construire le chemin de partition exact.
+    Cette approche corrige deux bugs simultanément :
+      (1) Inconsistance S3A : MinIO peut ne pas lister immédiatement un répertoire
+          venant d'être créé. Lire le parent (déjà connu) évite ce délai.
+      (2) Mismatch de zero-padding : _build_partition_path génère month=05 mais
+          Spark écrit les entiers sans padding (month=5). La lecture par chemin exact
+          levait donc systématiquement PATH_NOT_FOUND.
 
     Args:
         spark:  SparkSession active.
@@ -446,25 +458,38 @@ def validate_ingestion(
     now            = datetime.now()
     all_ok         = True
 
-    # Construction de la liste des partitions à vérifier
     checks = []
     if source in ("openfoodfacts", "all"):
         checks.append({
-            "name":     "openfoodfacts",
-            "path":     _build_partition_path(storage_cfg["raw_base_path"], "openfoodfacts", now),
-            "min_rows": validation_cfg["min_rows_openfoodfacts"],
+            "name":      "openfoodfacts",
+            "base_path": f"{storage_cfg['raw_base_path']}/openfoodfacts",
+            "min_rows":  validation_cfg["min_rows_openfoodfacts"],
         })
     if source in ("countries", "all"):
         checks.append({
-            "name":     "countries",
-            "path":     _build_partition_path(storage_cfg["raw_base_path"], "countries", now),
-            "min_rows": validation_cfg["min_rows_countries"],
+            "name":      "countries",
+            "base_path": f"{storage_cfg['raw_base_path']}/countries",
+            "min_rows":  validation_cfg["min_rows_countries"],
         })
 
     for check in checks:
-        logger.info("[VALID] Vérification partition : %s", check["path"])
+        logger.info(
+            "[VALID] Vérification %s | year=%d month=%d day=%d depuis %s",
+            check["name"], now.year, now.month, now.day, check["base_path"],
+        )
         try:
-            count = spark.read.parquet(check["path"]).count()
+            # Lecture depuis le chemin parent : Spark découvre toutes les partitions
+            # disponibles, puis le filtre pousse le prédicat sur les colonnes de partition
+            # (partition pruning) pour ne lire que les fichiers du jour.
+            count = (
+                spark.read.parquet(check["base_path"])
+                .filter(
+                    (col("year")  == now.year)
+                    & (col("month") == now.month)
+                    & (col("day")   == now.day)
+                )
+                .count()
+            )
             if count >= check["min_rows"]:
                 logger.info(
                     "[VALID] ✓ %-20s | %d lignes ≥ seuil %d",
@@ -478,8 +503,8 @@ def validate_ingestion(
                 all_ok = False
         except Exception as exc:
             logger.error(
-                "[VALID] ✗ Impossible de lire la partition '%s' : %s",
-                check["path"], exc, exc_info=True,
+                "[VALID] ✗ Impossible de lire '%s' : %s",
+                check["base_path"], exc, exc_info=True,
             )
             all_ok = False
 
