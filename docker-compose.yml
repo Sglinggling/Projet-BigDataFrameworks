@@ -98,6 +98,7 @@ services:
       cd /opt/spark/jars-extra &&
       [ ! -f hadoop-aws-3.3.4.jar ] && wget -q https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar || true ;
       [ ! -f aws-java-sdk-bundle-1.12.262.jar ] && wget -q https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.262/aws-java-sdk-bundle-1.12.262.jar || true ;
+      [ ! -f postgresql-42.7.1.jar ] && wget -q https://repo1.maven.org/maven2/org/postgresql/postgresql/42.7.1/postgresql-42.7.1.jar || true ;
       cp /opt/spark/jars-extra/*.jar /opt/spark/jars/ ;
       /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master --host spark-master
       "
@@ -132,6 +133,7 @@ services:
       cd /opt/spark/jars-extra &&
       [ ! -f hadoop-aws-3.3.4.jar ] && wget -q https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar || true ;
       [ ! -f aws-java-sdk-bundle-1.12.262.jar ] && wget -q https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.262/aws-java-sdk-bundle-1.12.262.jar || true ;
+      [ ! -f postgresql-42.7.1.jar ] && wget -q https://repo1.maven.org/maven2/org/postgresql/postgresql/42.7.1/postgresql-42.7.1.jar || true ;
       cp /opt/spark/jars-extra/*.jar /opt/spark/jars/ ;
       /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
       "

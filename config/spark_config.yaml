@@ -37,7 +37,8 @@ s3a:
 packages:
   - "org.apache.hadoop:hadoop-aws:3.3.4"
   - "com.amazonaws:aws-java-sdk-bundle:1.12.261"
-  - "org.postgresql:postgresql:42.7.1"      # Driver JDBC pour écrire dans PostgreSQL
+  # postgresql-42.7.1.jar est téléchargé dans jars-extra par docker-compose au démarrage
+  # → présent dans /opt/spark/jars/ automatiquement, pas besoin de le passer en packages
 
 # ── Configurations de persistance (cache) ────────────────────────────────────
 # Utilisées dans processor.py pour cache() / persist()
