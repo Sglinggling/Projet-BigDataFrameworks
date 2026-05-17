@@ -1,0 +1,12 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  auth_config.yaml — Configuration JWT pour l'API FastAPI
+#
+#  IMPORTANT : Changer secret_key avant tout déploiement en production.
+#              Ne jamais committer un vrai secret dans ce fichier.
+# ─────────────────────────────────────────────────────────────────────────────
+
+jwt:
+  # Clé secrète HMAC — doit rester confidentielle
+  secret_key: "efrei-m1-bigdata-food-nutrition-jwt-secret-2024-phase5-change-me"
+  algorithm: "HS256"
+  access_token_expire_minutes: 30
