@@ -4,6 +4,7 @@ data/input/
 data/raw/
 data/silver/
 data/sample/
+data/output/powerbi/*.csv
 
 # Extensions de données
 *.csv
