@@ -13,9 +13,27 @@ echo "=== 3. Installation pyyaml dans Spark (bug connu) ==="
 docker exec spark-master pip install pyyaml --quiet
 docker exec spark-worker pip install pyyaml --quiet
 
-echo "=== 4. Sync du JAR PostgreSQL master->worker ==="
-docker cp spark-master:/opt/spark/jars/postgresql-42.7.1.jar /tmp/pg-driver.jar
-docker cp /tmp/pg-driver.jar spark-worker:/opt/spark/jars/postgresql-42.7.1.jar
+echo "=== 4. Force la copie des JARs S3A et PostgreSQL dans les conteneurs ==="
+# Bug Docker Desktop: les gros JARs montés en volume peuvent être tronqués.
+# On les copie manuellement dans les conteneurs pour garantir leur intégrité.
+
+# JARs nécessaires
+for jar in "hadoop-aws-3.3.4.jar" "aws-java-sdk-bundle-1.12.262.jar" "postgresql-42.7.1.jar"; do
+  if [ ! -f "jars/$jar" ]; then
+    echo "⚠️  Fichier manquant : jars/$jar"
+    echo "   Télécharger avec : curl -L -o jars/$jar https://repo1.maven.org/maven2/..."
+    exit 1
+  fi
+
+  echo "   → Copie $jar vers spark-master et spark-worker"
+  docker cp "jars/$jar" "spark-master:/opt/spark/jars/$jar"
+  docker cp "jars/$jar" "spark-worker:/opt/spark/jars/$jar"
+done
+
+# Vérification des tailles (sanity check)
+echo "   → Vérification des tailles dans les conteneurs :"
+docker exec spark-master ls -lh /opt/spark/jars/aws-java-sdk-bundle-1.12.262.jar | awk '{print "     master: "$5"  "$NF}'
+docker exec spark-worker ls -lh /opt/spark/jars/aws-java-sdk-bundle-1.12.262.jar | awk '{print "     worker: "$5"  "$NF}'
 
 echo "=== 5. Nettoyage MinIO ==="
 docker exec minio mc alias set local http://localhost:9000 minioadmin minioadmin123 2>/dev/null || true
